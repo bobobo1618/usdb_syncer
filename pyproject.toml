@@ -5,10 +5,7 @@ description = "A download manager for USDB songs."
 authors = [{ name = "Markus Böhning", email = "markus.boehning@gmail.com" }]
 maintainers = [
     { name = "RumovZ", email = "gp5glkw78@relay.firefox.com" },
-    {
-        name = "randompersona1",
-        email = "74961116+randompersona1@users.noreply.github.com",
-    },
+    { name = "randompersona1", email = "74961116+randompersona1@users.noreply.github.com" },
 ]
 requires-python = ">=3.11,<3.13"
 readme = "README.md"
@@ -27,6 +24,7 @@ dependencies = [
     "pillow>=10",
     "platformdirs",
     "PySide6",
+    "python-ffmpeg==2.0.12",
     "qrcode[pil]~=8.2",
     "reportlab",
     "requests",
@@ -41,13 +39,8 @@ dependencies = [
 [project.optional-dependencies]
 instrumental-cpu = [
     "demucs==4.0.1",
-    "torch==2.7.0+cpu",
-    "torchaudio==2.7.0+cpu",
-]
-instrumental-cuda = [
-    "demucs==4.0.1",
-    "torch==2.7.0+cu128",
-    "torchaudio==2.7.0+cu128",
+    "torch==2.7.0",
+    "torchaudio==2.7.0",
 ]
 
 [project.urls]
