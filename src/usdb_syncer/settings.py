@@ -9,21 +9,21 @@ from __future__ import annotations
 
 import functools
 import os
-import shutil
-import subprocess
 import threading
 from enum import Enum, StrEnum, auto
 from http.cookiejar import CookieJar
 from pathlib import Path
-from typing import Any, ClassVar, TypeVar, assert_never, cast
+from typing import TYPE_CHECKING, Any, ClassVar, TypeVar, assert_never, cast
 
 import keyring
 import rookiepy
 from PySide6.QtCore import QByteArray, QSettings
 
-from usdb_syncer import path_template, utils
 from usdb_syncer.constants import Usdb
 from usdb_syncer.logger import logger
+
+if TYPE_CHECKING:
+    from usdb_syncer import path_template
 
 SYSTEM_USDB = "USDB Syncer/USDB"
 NO_KEYRING_BACKEND_WARNING = (
@@ -50,17 +50,6 @@ def set_usdb_auth(username: str, password: str) -> None:
     except keyring.core.backend.errors.NoKeyringError as error:
         logger.debug(error)
         logger.warning(NO_KEYRING_BACKEND_WARNING)
-
-
-def ffmpeg_is_available() -> bool:
-    if shutil.which("ffmpeg") and shutil.which("ffprobe"):
-        return True
-    if (path := get_ffmpeg_dir()) and path not in os.environ["PATH"]:
-        # first run; restore path from settings
-        utils.add_to_system_path(path)
-        if shutil.which("ffmpeg") and shutil.which("ffprobe"):
-            return True
-    return False
 
 
 class _TemporarySettings:
@@ -159,6 +148,8 @@ class SettingKey(Enum):
 
     SONG_DIR = "song_dir"
     FFMPEG_DIR = "ffmpeg_dir"
+    DENO_DIR = "deno_dir"
+    AUTO_UPDATE = "downloads/auto_update"
     BROWSER = "downloads/browser"
     TXT = "downloads/txt"
     ENCODING = "downloads/encoding"
@@ -188,14 +179,17 @@ class SettingKey(Enum):
     BACKGROUND = "downloads/background"
     BACKGROUND_ALWAYS = "downloads/background_always"
     DISCORD_ALLOWED = "downloads/discord_allowed"
+    TRASH_REMOTELY_DELETED_SONGS = "downloads/trash_remotely_deleted_songs"
     MAIN_WINDOW_GEOMETRY = "geometry/main_window"
     DOCK_LOG_GEOMETRY = "geometry/dock_log"
     MAIN_WINDOW_STATE = "state/main_window"
     TABLE_VIEW_HEADER_STATE = "list_view/header/state"
     USDB_USER_NAME = "usdb/username"
     PATH_TEMPLATE = "files/path_template"
+    TRASH_FILES = "files/trash_files"
     APP_PATH_KAREDI = "app_paths/karedi"
     APP_PATH_PERFORMOUS = "app_paths/performous"
+    APP_PATH_TUNE_PERFECT = "app_paths/tune_perfect"
     APP_PATH_ULTRASTAR_MANAGER = "app_paths/ultrastar_manager"
     APP_PATH_USDX = "app_paths/usdx"
     APP_PATH_VOCALUXE = "app_paths/vocaluxe"
@@ -209,6 +203,8 @@ class SettingKey(Enum):
     VIEW_THEME = "view/theme"
     VIEW_PRIMARY_COLOR = "view/primary_color"
     VIEW_COLORED_BACKGROUND = "view/colored_background"
+    DIFF_ONLY_CHANGES = "diff/only_changes"
+    DIFF_CONTEXT_LINES = "diff/context_lines"
 
 
 class Encoding(Enum):
@@ -698,6 +694,7 @@ class SupportedApps(StrEnum):
 
     KAREDI = auto()
     PERFORMOUS = auto()
+    TUNE_PERFECT = auto()
     ULTRASTAR_MANAGER = auto()
     USDX = auto()
     VOCALUXE = auto()
@@ -709,6 +706,8 @@ class SupportedApps(StrEnum):
                 return "Karedi"
             case SupportedApps.PERFORMOUS:
                 return "Performous"
+            case SupportedApps.TUNE_PERFECT:
+                return "Tune Perfect"
             case SupportedApps.ULTRASTAR_MANAGER:
                 return "UltraStar Manager"
             case SupportedApps.USDX:
@@ -726,6 +725,8 @@ class SupportedApps(StrEnum):
                 return "Karedi"
             case SupportedApps.PERFORMOUS:
                 return "performous"
+            case SupportedApps.TUNE_PERFECT:
+                return "tuneperfect"
             case SupportedApps.ULTRASTAR_MANAGER:
                 return "UltraStar-Manager"
             case SupportedApps.USDX:
@@ -743,6 +744,8 @@ class SupportedApps(StrEnum):
                 return ""
             case SupportedApps.PERFORMOUS:
                 return ""
+            case SupportedApps.TUNE_PERFECT:
+                return "--songpath"
             case SupportedApps.ULTRASTAR_MANAGER:
                 return "-songpath"
             case SupportedApps.USDX:
@@ -753,31 +756,6 @@ class SupportedApps(StrEnum):
                 return ""
             case _ as unreachable:
                 assert_never(unreachable)
-
-    def open_app(self, path: Path) -> None:
-        logger.debug(f"Starting {self} with '{path}'.")
-        executable = get_app_path(self)
-        if executable is None:
-            return
-        if executable.suffix == ".jar":
-            cmd = ["java", "-jar", str(executable), str(path)]
-        else:
-            cmd = [str(executable), self.songpath_parameter(), str(path)]
-        try:
-            utils.start_process_detached(cmd)
-        except FileNotFoundError:
-            logger.error(
-                f"Failed to launch {self} from '{executable!s}', file not found. "
-                "Please check the executable path in the settings."
-            )
-        except OSError:
-            logger.exception(
-                f"Failed to launch {self} from '{executable!s}', I/O error."
-            )
-        except subprocess.SubprocessError:
-            logger.exception(
-                f"Failed to launch {self} from '{executable!s}', subprocess error."
-            )
 
 
 class ReportPDFPagesize(Enum):
@@ -805,6 +783,14 @@ class ReportPDFOrientation(Enum):
 
 def reset() -> None:
     _Settings.reset()
+
+
+def get_auto_update() -> bool:
+    return _Settings.get(SettingKey.AUTO_UPDATE, False)
+
+
+def set_auto_update(value: bool, temp: bool = False) -> None:
+    _Settings.set(SettingKey.AUTO_UPDATE, value, temp)
 
 
 def get_throttling_threads() -> int:
@@ -960,7 +946,7 @@ def set_browser(value: Browser, temp: bool = False) -> None:
 
 
 def get_song_dir() -> Path:
-    return _Settings.get(SettingKey.SONG_DIR, Path("songs").resolve())
+    return _Settings.get(SettingKey.SONG_DIR, Path.home().joinpath("songs").resolve())
 
 
 def set_song_dir(value: Path, temp: bool = False) -> None:
@@ -1055,6 +1041,14 @@ def set_ffmpeg_dir(value: str, temp: bool = False) -> None:
     _Settings.set(SettingKey.FFMPEG_DIR, value, temp)
 
 
+def get_deno_dir() -> str:
+    return _Settings.get(SettingKey.DENO_DIR, "")
+
+
+def set_deno_dir(value: str, temp: bool = False) -> None:
+    _Settings.set(SettingKey.DENO_DIR, value, temp)
+
+
 def get_geometry_main_window() -> QByteArray:
     return _Settings.get(SettingKey.MAIN_WINDOW_GEOMETRY, QByteArray())
 
@@ -1087,8 +1081,10 @@ def set_table_view_header_state(state: QByteArray, temp: bool = False) -> None:
     _Settings.set(SettingKey.TABLE_VIEW_HEADER_STATE, state, temp)
 
 
-def get_path_template() -> path_template.PathTemplate:
-    return _Settings.get(SettingKey.PATH_TEMPLATE, path_template.PathTemplate.default())
+def get_path_template(
+    default: path_template.PathTemplate,
+) -> path_template.PathTemplate:
+    return _Settings.get(SettingKey.PATH_TEMPLATE, default)
 
 
 def set_path_template(template: path_template.PathTemplate, temp: bool = False) -> None:
@@ -1125,6 +1121,8 @@ def get_app_path(app: SupportedApps) -> Path | None:
             path = _Settings.get(SettingKey.APP_PATH_KAREDI, "")
         case SupportedApps.PERFORMOUS:
             path = _Settings.get(SettingKey.APP_PATH_PERFORMOUS, "")
+        case SupportedApps.TUNE_PERFECT:
+            path = _Settings.get(SettingKey.APP_PATH_TUNE_PERFECT, "")
         case SupportedApps.ULTRASTAR_MANAGER:
             path = _Settings.get(SettingKey.APP_PATH_ULTRASTAR_MANAGER, "")
         case SupportedApps.USDX:
@@ -1145,6 +1143,8 @@ def set_app_path(app: SupportedApps, path: str, temp: bool = False) -> None:
             setting_key = SettingKey.APP_PATH_KAREDI
         case SupportedApps.PERFORMOUS:
             setting_key = SettingKey.APP_PATH_PERFORMOUS
+        case SupportedApps.TUNE_PERFECT:
+            setting_key = SettingKey.APP_PATH_TUNE_PERFECT
         case SupportedApps.ULTRASTAR_MANAGER:
             setting_key = SettingKey.APP_PATH_ULTRASTAR_MANAGER
         case SupportedApps.USDX:
@@ -1209,3 +1209,35 @@ def get_report_json_indent() -> int:
 
 def set_report_json_indent(indent: int, temp: bool = False) -> None:
     _Settings.set(SettingKey.REPORT_JSON_INDENT, indent, temp)
+
+
+def get_trash_remotely_deleted_songs() -> bool:
+    return _Settings.get(SettingKey.TRASH_REMOTELY_DELETED_SONGS, False)
+
+
+def set_trash_remotely_deleted_songs(value: bool, temp: bool = False) -> None:
+    _Settings.set(SettingKey.TRASH_REMOTELY_DELETED_SONGS, value, temp)
+
+
+def get_trash_files() -> bool:
+    return _Settings.get(SettingKey.TRASH_FILES, True)
+
+
+def set_trash_files(value: bool, temp: bool = False) -> None:
+    _Settings.set(SettingKey.TRASH_FILES, value, temp)
+
+
+def get_diff_only_changes() -> bool:
+    return _Settings.get(SettingKey.DIFF_ONLY_CHANGES, False)
+
+
+def set_diff_only_changes(value: bool, temp: bool = False) -> None:
+    _Settings.set(SettingKey.DIFF_ONLY_CHANGES, value, temp)
+
+
+def get_diff_context_lines() -> int:
+    return _Settings.get(SettingKey.DIFF_CONTEXT_LINES, 3)
+
+
+def set_diff_context_lines(lines: int, temp: bool = False) -> None:
+    _Settings.set(SettingKey.DIFF_CONTEXT_LINES, lines, temp)

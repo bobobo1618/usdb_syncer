@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from enum import StrEnum
 from typing import Literal
 
 import attrs
+from attr import fields
 
 from usdb_syncer.logger import Logger
 
@@ -26,6 +28,13 @@ def decode_meta_tag_value(meta_tag: str) -> str:
     for char, escape in META_TAG_ESCAPES:
         meta_tag = meta_tag.replace(escape, char)
     return meta_tag
+
+
+class ImagePrefix(StrEnum):
+    """Prefixes for image-related meta tags."""
+
+    COVER = "co"
+    BACKGROUND = "bg"
 
 
 @attrs.define
@@ -109,12 +118,17 @@ class ImageMetaTags:
         """True if there is data for image processing."""
         return any((self.rotate, self.crop, self.resize, self.contrast))
 
-    def to_str(self, prefix: str) -> str:
+    def to_str(self, prefix: ImagePrefix) -> str:
         return _join_tags(
             _key_value_str(prefix, self.source),
             _key_value_str(f"{prefix}-rotate", self.rotate),
-            self.crop.to_str(prefix) if self.crop else None,
+            self.crop.to_str(prefix)
+            if self.crop and prefix == ImagePrefix.COVER
+            else None,
             self.resize.to_str(prefix) if self.resize else None,
+            self.crop.to_str(prefix)
+            if self.crop and prefix == ImagePrefix.BACKGROUND
+            else None,
             _key_value_str(f"{prefix}-contrast", self.contrast),
         )
 
@@ -173,12 +187,13 @@ class MetaTags:
     def _parse_key_value_pair(  # noqa: C901
         self, key: str, value: str, logger: Logger
     ) -> None:
+        key = key.lower()
         value = decode_meta_tag_value(value)
         match key:
             case "v":
                 self.video = value
-            case "v-trim" | "v-crop" | "co-protocol" | "bg-protocol":
-                logger.debug(f"Unused meta tag found: {key}={value}")
+            case "v-trim" | "v-crop":
+                logger.debug(f"Unsupported meta tag found: {key}={value}")
             case "a":
                 self.audio = value
             case "co":
@@ -218,14 +233,18 @@ class MetaTags:
         return _join_tags(
             _key_value_str("a", self.audio),
             _key_value_str("v", self.video),
-            self.cover.to_str("co") if self.cover else None,
-            self.background.to_str("bg") if self.background else None,
+            self.cover.to_str(ImagePrefix.COVER) if self.cover else None,
+            self.background.to_str(ImagePrefix.BACKGROUND) if self.background else None,
             _key_value_str("p1", self.player1),
             _key_value_str("p2", self.player2),
             _key_value_str("preview", self.preview),
             str(self.medley) if self.medley else None,
             _key_value_str("tags", self.tags),
         )
+
+    def is_empty(self) -> bool:
+        """Check if all fields are None."""
+        return all(getattr(self, field.name) is None for field in fields(MetaTags))
 
 
 def _key_value_str(key: str, value: str | float | None) -> str | None:

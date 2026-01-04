@@ -2,7 +2,7 @@
 
 import re
 
-MINIMUM_BPM = 200.0
+BPM_THRESHOLD = 200.0
 GITHUB_API_LATEST = "https://api.github.com/repos/bohning/usdb_syncer/releases/latest"
 GITHUB_DL_LATEST = "https://github.com/bohning/usdb_syncer/releases/latest"
 GITHUB_SHARED_CONTENT = (
@@ -103,14 +103,16 @@ class YtErrorMsg:
     YT_AGE_RESTRICTED = (
         "Sign in to confirm your age. This video may be inappropriate for some users."
     )
-    YT_GEO_RESTRICTED = (
-        "Video unavailable. The uploader has not made this video available in your "
-        "country"
+    YT_GEO_RESTRICTED_1 = (
+        "The uploader has not made this video available in your country"
     )
-    YT_GEO_BLOCKED = "Video unavailable. This video contains content from"
+    YT_GEO_RESTRICTED_2 = "Video unavailable. This video contains content from"
+    YT_GEO_RESTRICTED_3 = "Video unavailable. This video is not available"
     YT_UNAVAILABLE = "Video unavailable"
     YT_PARSE_ERROR = "Failed to parse XML"
     YT_FORBIDDEN = "HTTP Error 403: Forbidden"
+    YT_PREMIUM_ONLY = "This video is only available to Music Premium members"
+    VM_UNAUTHENTICATED = "You're trying to use an unauthenticated request"
 
 
 SUPPORTED_VIDEO_SOURCES_REGEX = re.compile(

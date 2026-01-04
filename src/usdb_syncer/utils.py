@@ -5,6 +5,7 @@ import functools
 import itertools
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -14,17 +15,18 @@ from types import TracebackType
 from typing import ClassVar
 
 import requests
-from appdirs import AppDirs
+import send2trash
 from bs4 import BeautifulSoup, Tag
 from packaging import version
+from platformdirs import PlatformDirs
 from unidecode import unidecode
 
 import usdb_syncer
-from usdb_syncer import constants
+from usdb_syncer import constants, errors, settings
 from usdb_syncer.logger import logger
 
 CACHE_LIFETIME = 60 * 60
-_app_dirs = AppDirs("usdb_syncer", "bohning")
+_platform_dirs = PlatformDirs("usdb_syncer", "bohning")
 
 
 # https://pyinstaller.org/en/stable/runtime-information.html#run-time-information
@@ -65,6 +67,30 @@ def video_url_from_resource(resource: str) -> str | None:
     return None
 
 
+def _parse_polsy_html(html: str) -> list[str] | None:
+    """Parses the HTML from polsy.org.uk and returns a list of allowed countries."""
+
+    soup = BeautifulSoup(html, "lxml")
+    allowed_countries = []
+
+    table = soup.find("table")
+    if not table or not isinstance(table, Tag):
+        return None
+
+    rows = table.find_all("tr")[1:]
+
+    for row in rows:
+        if not isinstance(row, Tag):
+            continue
+        cols = row.find_all("td")
+        if len(cols) < 2:
+            continue
+        if country_code := cols[0].text.split(" - ", 1)[0]:
+            allowed_countries.append(country_code)
+
+    return allowed_countries
+
+
 def get_allowed_countries(resource: str) -> list[str] | None:
     """Fetches YouTube video availability information from polsy.org.uk."""
 
@@ -74,29 +100,7 @@ def get_allowed_countries(resource: str) -> list[str] | None:
     if not response.ok:
         return None
 
-    soup = BeautifulSoup(response.text, "html.parser")
-    allowed_countries = []
-
-    table = soup.find("table")
-    if not table or not isinstance(table, Tag):
-        return None
-
-    rows = table.find_all("tr")[1:]  # Skip the header row
-
-    for row in rows:
-        if not isinstance(row, Tag):
-            continue
-        columns = row.find_all("td")
-        if len(columns) < 2:
-            continue  # Skip invalid rows
-
-        allowed_text = columns[0].get_text(strip=True)
-
-        if allowed_text:
-            country_code = allowed_text.split(" - ")[0]
-            allowed_countries.append(country_code)
-
-    return allowed_countries
+    return _parse_polsy_html(response.text)
 
 
 def remove_ansi_codes(text: str) -> str:
@@ -117,11 +121,11 @@ def get_first_alphanum_upper(text: str) -> str | None:
 class AppPaths:
     """App data paths."""
 
-    log = Path(_app_dirs.user_data_dir, "usdb_syncer.log")
-    db = Path(_app_dirs.user_data_dir, "usdb_syncer.db")
-    addons = Path(_app_dirs.user_data_dir, "addons")
-    song_list = Path(_app_dirs.user_cache_dir, "available_songs.json")
-    profile = Path(_app_dirs.user_cache_dir, "usdb_syncer.prof")
+    log = Path(_platform_dirs.user_data_dir, "usdb_syncer.log")
+    db = Path(_platform_dirs.user_data_dir, "usdb_syncer.db")
+    addons = Path(_platform_dirs.user_data_dir, "addons")
+    song_list = Path(_platform_dirs.user_cache_dir, "available_songs.json")
+    profile = Path(_platform_dirs.user_cache_dir, "usdb_syncer.prof")
     shared = (_root() / "shared") if IS_SOURCE else None
 
     @classmethod
@@ -309,9 +313,16 @@ def format_timestamp(micros: int) -> str:
 
 
 def get_latest_version() -> str | None:
-    response = requests.get(constants.GITHUB_API_LATEST, timeout=5)
-    if response.status_code == 200:
-        return response.json()["tag_name"]
+    try:
+        response = requests.get(constants.GITHUB_API_LATEST, timeout=5)
+        response.raise_for_status()
+        return response.json().get("tag_name")
+    except requests.Timeout:
+        logger.warning(
+            "Failed to retrieve latest version from GitHub, API request timed out."
+        )
+    except requests.RequestException as e:
+        logger.warning(f"Failed to retrieve latest version from GitHub, API error: {e}")
     return None
 
 
@@ -359,6 +370,62 @@ def get_media_duration(path: Path) -> float:
         check=True,
     )
     return float(result.stdout)
+
+
+def ffmpeg_is_available() -> bool:
+    if shutil.which("ffmpeg") and shutil.which("ffprobe"):
+        return True
+    if (path := settings.get_ffmpeg_dir()) and path not in os.environ["PATH"]:
+        # first run; restore path from settings
+        add_to_system_path(path)
+        if shutil.which("ffmpeg") and shutil.which("ffprobe"):
+            return True
+    return False
+
+
+def deno_is_available() -> bool:
+    if shutil.which("deno"):
+        return True
+    if (path := settings.get_deno_dir()) and path not in os.environ["PATH"]:
+        # first run; restore path from settings
+        add_to_system_path(path)
+        if shutil.which("deno"):
+            return True
+    return False
+
+
+def open_external_app(app: settings.SupportedApps, path: Path) -> None:
+    logger.debug(f"Starting {app} with '{path}'.")
+    executable = settings.get_app_path(app)
+    if executable is None:
+        return
+    if executable.suffix == ".jar":
+        cmd = ["java", "-jar", str(executable), str(path)]
+    else:
+        cmd = [str(executable), app.songpath_parameter(), str(path)]
+    try:
+        start_process_detached(cmd)
+    except FileNotFoundError:
+        logger.error(
+            f"Failed to launch {app} from '{executable!s}', file not found. "
+            "Please check the executable path in the settings."
+        )
+    except OSError:
+        logger.exception(f"Failed to launch {app} from '{executable!s}', I/O error.")
+    except subprocess.SubprocessError:
+        logger.exception(
+            f"Failed to launch {app} from '{executable!s}', subprocess error."
+        )
+
+
+def trash_or_delete_path(path: Path) -> None:
+    if settings.get_trash_files():
+        try:
+            send2trash.send2trash(path)
+        except send2trash.TrashPermissionError as err:
+            raise errors.TrashError(path) from err
+    else:
+        shutil.rmtree(path) if path.is_dir() else path.unlink()
 
 
 class LinuxEnvCleaner:

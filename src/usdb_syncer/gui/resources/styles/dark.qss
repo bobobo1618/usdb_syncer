@@ -56,7 +56,7 @@ QTreeView::indicator:indeterminate,
 QListView::indicator:checked,
 QGroupBox::indicator:checked,
 QCheckBox::indicator:checked {{
-    image: url(":/icons/check-white.svg");
+    image: url(":/icons/tick-white.svg");
 }}
 QGroupBox::indicator {{
     margin-top: 1px;
@@ -189,6 +189,10 @@ QToolButton {{
 }}
 QToolButton:checked {{
   border: 1px solid {on_surface};
+}}
+QPushButton:flat {{
+  background-color: transparent;
+  padding: 0;
 }}
 
 
@@ -331,7 +335,15 @@ QMenu {{
     background: {surface_08dp};
     border: none;
 }}
-QMenu:disabled {{
+QMenu:disabled,
+QPushButton:disabled,
+QToolButton:disabled,
+QLineEdit:disabled,
+QTextEdit:disabled,
+QSpinBox:disabled,
+QSpinBox:disabled,
+QDoubleSpinBox:disabled,
+QDoubleSpinBox:disabled {{
     color: {text_disabled};
 }}
 QMenu::separator {{

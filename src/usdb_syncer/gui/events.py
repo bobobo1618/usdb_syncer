@@ -4,6 +4,25 @@ import attrs
 
 from usdb_syncer import db, events
 from usdb_syncer.gui import theme
+from usdb_syncer.usdb_song import UsdbSong
+
+# table
+
+
+@attrs.define(slots=False)
+class CurrentSongChanged(events.SubscriptableEvent):
+    """Sent when the currently selected song changed."""
+
+    song: UsdbSong | None
+
+
+@attrs.define(slots=False)
+class RowCountChanged(events.SubscriptableEvent):
+    """Sent when the number of total or selected songs changed."""
+
+    rows: int
+    selected: int
+
 
 # search
 

@@ -12,8 +12,9 @@ import yt_dlp
 from PIL import Image, ImageEnhance, ImageOps
 from PIL.Image import Resampling
 
-from usdb_syncer import utils
+from usdb_syncer import SongId, utils
 from usdb_syncer.constants import YtErrorMsg
+from usdb_syncer.discord import notify_discord
 from usdb_syncer.download_options import AudioOptions, VideoOptions
 from usdb_syncer.logger import Logger, song_logger
 from usdb_syncer.meta_tags import ImageMetaTags
@@ -48,6 +49,23 @@ class ResourceDLError(Enum):
     RESOURCE_PARSE_ERROR = "resource parse error"
     RESOURCE_DL_FAILED = "resource download failed"
     RESOURCE_FORBIDDEN = "resource forbidden"
+    RESOURCE_PREMIUM_ONLY = "resource premium only"
+
+    def should_notify(self) -> bool:
+        """Return whether this error type should trigger a Discord notification."""
+        return self in {
+            ResourceDLError.RESOURCE_INVALID,
+            ResourceDLError.RESOURCE_UNSUPPORTED,
+            ResourceDLError.RESOURCE_UNAVAILABLE,
+            ResourceDLError.RESOURCE_PARSE_ERROR,
+        }
+
+    def notify_discord(
+        self, song_id: SongId, url: str, kind: str, logger: Logger
+    ) -> None:
+        """Send a Discord notification for this error if enabled."""
+        if self.should_notify():
+            notify_discord(song_id, url, kind, self.value, logger)
 
 
 @dataclass
@@ -184,12 +202,19 @@ def _download_resource(
         except yt_dlp.utils.YoutubeDLError as e:
             error_message = utils.remove_ansi_codes(str(e))
             logger.debug(f"Failed to download '{url}': {error_message}")
-            if YtErrorMsg.YT_AGE_RESTRICTED in error_message:
+            if any(
+                msg in error_message
+                for msg in (YtErrorMsg.YT_AGE_RESTRICTED, YtErrorMsg.VM_UNAUTHENTICATED)
+            ):
                 dl_result = _retry_with_cookies(url, options, logger)
                 return ResourceDLResult(extension=dl_result.extension)
-            if (
-                YtErrorMsg.YT_GEO_RESTRICTED in error_message
-                or YtErrorMsg.YT_GEO_BLOCKED in error_message
+            if any(
+                msg in error_message
+                for msg in (
+                    YtErrorMsg.YT_GEO_RESTRICTED_1,
+                    YtErrorMsg.YT_GEO_RESTRICTED_2,
+                    YtErrorMsg.YT_GEO_RESTRICTED_3,
+                )
             ):
                 _handle_geo_restriction(url, resource, logger)
                 return ResourceDLResult(error=ResourceDLError.RESOURCE_GEO_RESTRICTED)
@@ -202,6 +227,9 @@ def _download_resource(
             if YtErrorMsg.YT_FORBIDDEN in error_message:
                 _handle_forbidden(url, logger)
                 return ResourceDLResult(error=ResourceDLError.RESOURCE_FORBIDDEN)
+            if YtErrorMsg.YT_PREMIUM_ONLY in error_message:
+                _handle_premium_only(url, logger)
+                return ResourceDLResult(error=ResourceDLError.RESOURCE_PREMIUM_ONLY)
             raise
 
 
@@ -239,6 +267,10 @@ def _handle_unavailable(url: str, logger: Logger) -> None:
 
 def _handle_parse_error(url: str, logger: Logger) -> None:
     logger.warning(f"Failed to parse XML for resource '{url}'.")
+
+
+def _handle_premium_only(url: str, logger: Logger) -> None:
+    logger.warning(f"Failed to download resource '{url}'. Resource is premium-only.")
 
 
 def _handle_forbidden(url: str, logger: Logger) -> None:

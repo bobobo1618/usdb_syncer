@@ -10,11 +10,13 @@ from typing import NamedTuple
 import attrs
 
 from usdb_syncer.constants import (
+    BPM_THRESHOLD,
     LANGUAGES_WITH_SPACED_QUOTES,
-    MINIMUM_BPM,
     QUOTATION_MARKS,
     QUOTATION_MARKS_TO_REPLACE,
 )
+
+NARROW_NO_BREAK_SPACE = "\u202f"
 
 
 class QuotationMarkReplacementResult(NamedTuple):
@@ -48,13 +50,13 @@ class BeatsPerMinute:
         return self.beats_to_secs(beats) * 1000
 
     def is_too_low(self) -> bool:
-        return self.value < MINIMUM_BPM
+        return self.value <= BPM_THRESHOLD
 
     def make_large_enough(self) -> int:
         """Double BPM (if necessary, multiple times) until it is above MINIMUM_BPM
         and returns the required multiplication factor."""
         # how often to double bpm until it is larger or equal to the threshold
-        exp = math.ceil(math.log2(MINIMUM_BPM / self.value))
+        exp = math.ceil(math.log2(BPM_THRESHOLD / self.value))
         factor = 2**exp
         self.value = self.value * factor
         return factor
@@ -92,24 +94,26 @@ def replace_false_quotation_marks(
     while i < len(text):
         char = text[i]
         if char in QUOTATION_MARKS_TO_REPLACE:
+            replacement = opening_quote if opening else closing_quote
+            if char != replacement:
+                marks_fixed += 1
             if opening:
                 new_text.append(opening_quote)
                 if spaced_quotes:
-                    new_text.append(" ")
+                    new_text.append(NARROW_NO_BREAK_SPACE)
                     if i < len(text) - 1 and text[i + 1].isspace():
                         i += 1  # skip space
             else:
                 if spaced_quotes:
                     if i > 0 and text[i - 1].isspace():
-                        new_text.pop()  # remove already appended whitespace
-                    new_text.append(" ")
+                        new_text.pop()  # remove trailing space
+                    new_text.append(NARROW_NO_BREAK_SPACE)
                 new_text.append(closing_quote)
             opening = not opening
-            marks_fixed += 1
         else:
             new_text.append(char)
         i += 1
 
-    text = "".join(new_text)
+    fixed_text = "".join(new_text)
 
-    return QuotationMarkReplacementResult(text, marks_fixed, opening)
+    return QuotationMarkReplacementResult(fixed_text, marks_fixed, opening)

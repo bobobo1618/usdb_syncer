@@ -1,3 +1,84 @@
+<!-- 0.19.0 -->
+
+# Changes
+
+## Features
+
+## Fixes
+
+## Developer notes
+
+- The build process was migrated to uv. Poetry is no longer used.
+  See the README for instructions.
+
+<!-- 0.18.0 -->
+
+# Changes
+- yt-dlp has been updated to latest available version 2025.11.12, solving latest download issues. This introduces Deno Javascript Runtime as new external dependency.
+The Syncer will inform you about this missing dependency and will give hints on how to install Deno on your OS.
+
+## Features
+
+- Medley sections are auto-corrected to start on the first beat of the first note of a line and to end of the last beat of the last note of a line.
+- Local changes can now be submitted to USDB. Please use this feature only for significant adaptations, enhancements and corrections (please use the comment function for small corrections, especially when it only concerns header values such as #GAP or #BPM).
+- The statuses of the resources (success/unchanged, fallback resource, unavailable/disabled, failed) is now indicated in the respective columns.
+
+## Fixes
+
+
+
+<!-- 0.17.0 -->
+
+# Changes
+
+## Features
+
+- A new dock widget displays the cover of the currently selected song.
+
+## Fixes
+
+- Handled HTML escapes in the USDB song list (e.g. `&` instead of `&amp;`).
+- Fixed running the webserver from the bundled app.
+- Check if webserver port is valid and not in use.
+
+<!-- 0.16.0 -->
+
+# Changes
+
+## Features
+
+- A webserver can be launched to let devices in the local network browse your song collection.
+- Added filters for custom data to the sidebar tree.
+- Files may be deleted permanently instead of being sent to the trash folder - useful to save disk space or if trashing is not supported on your system.
+- Medley sections are now checked if they start on a line start and end on a line end, otherwise a warning is issued.
+- The song previewer can be launched as a standalone window (`usdb_syncer preview path/to/song.txt`).
+
+## Fixes
+
+- Fixed deleting songs on startup that were removed from USDB.
+- The Syncer will now also retry for Vimeo resources with logged-in cookies if necessary.
+
+<!-- 0.15.0 -->
+
+# Changes
+
+## Features
+
+- Upon start, not only new songs are fetched, but updates for existing songs as well.
+  - The first launch may take a while, because the song list has to be rebuilt.
+- There are now shortcuts for commonly used actions.
+- Added Tune Perfect (https://tuneperfect.org/) to supported apps. You can now open a selected song in Tune Perfect directly via the Syncer.
+- Meta tags parsing is now case insensitive.
+- Don't overwrite song txt if contents haven't changed (preserve metadata).
+- Local songs may be automatically trashed if the according USDB songs were removed.
+- The columns of the song table may be reorganized by drag-and-drop.
+
+## Fixes
+
+- Fixed extraction of allowed countries for geo-restricted resources.
+- The song directory now defaults to ~/songs to avoid possible permission issues with the current directory.
+- Enable the app to run if sounddevice / portaudio is not available (required for the preview feature).
+
 <!-- 0.14.0 -->
 
 # Changes

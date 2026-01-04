@@ -24,10 +24,23 @@
      </property>
     </widget>
    </item>
+   <item row="2" column="0">
+    <spacer name="verticalSpacer_2">
+     <property name="orientation">
+      <enum>Qt::Orientation::Vertical</enum>
+     </property>
+     <property name="sizeHint" stdset="0">
+      <size>
+       <width>20</width>
+       <height>40</height>
+      </size>
+     </property>
+    </spacer>
+   </item>
    <item row="0" column="0" rowspan="2" colspan="2">
     <widget class="QTabWidget" name="tabWidget">
      <property name="currentIndex">
-      <number>0</number>
+      <number>2</number>
      </property>
      <widget class="QWidget" name="tab">
       <attribute name="title">
@@ -104,7 +117,14 @@
         <number>20</number>
        </property>
        <item>
-        <layout class="QVBoxLayout" name="verticalLayout" stretch="0,0,0,0,0">
+        <layout class="QVBoxLayout" name="verticalLayout" stretch="0,0,0,0,0,0">
+         <item>
+          <widget class="QCheckBox" name="checkBox_auto_update">
+           <property name="text">
+            <string>Automatically update outdated songs</string>
+           </property>
+          </widget>
+         </item>
          <item>
           <widget class="QGroupBox" name="groupBox_login">
            <property name="title">
@@ -334,6 +354,9 @@
               </property>
               <property name="toolTip">
                <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;If checked, background images will be downloaded even if there is a video for the song as well.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+              </property>
+              <property name="layoutDirection">
+               <enum>Qt::LayoutDirection::RightToLeft</enum>
               </property>
               <property name="text">
                <string/>
@@ -766,6 +789,38 @@
         </widget>
        </item>
        <item>
+        <widget class="QGroupBox" name="groupBox_4">
+         <property name="minimumSize">
+          <size>
+           <width>0</width>
+           <height>0</height>
+          </size>
+         </property>
+         <property name="title">
+          <string>File cleanup</string>
+         </property>
+         <layout class="QVBoxLayout" name="verticalLayout_7">
+          <item>
+           <widget class="QCheckBox" name="checkBox_trash_files">
+            <property name="text">
+             <string>When removing files, send them to the trash folder instead.</string>
+            </property>
+            <property name="checked">
+             <bool>true</bool>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QCheckBox" name="checkBox_trash_remotely_deleted_songs">
+            <property name="text">
+             <string>On startup, remove songs that have been deleted on USDB.</string>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <item>
         <spacer name="verticalSpacer_3">
          <property name="orientation">
           <enum>Qt::Orientation::Vertical</enum>
@@ -827,7 +882,7 @@
              <string/>
             </property>
             <property name="pixmap">
-             <pixmap>:/icons/usdx.png</pixmap>
+             <pixmap resource="../resources/qt/resources.qrc">:/icons/usdx.png</pixmap>
             </property>
             <property name="scaledContents">
              <bool>true</bool>
@@ -893,7 +948,7 @@
              <string/>
             </property>
             <property name="pixmap">
-             <pixmap>:/icons/vocaluxe.png</pixmap>
+             <pixmap resource="../resources/qt/resources.qrc">:/icons/vocaluxe.png</pixmap>
             </property>
             <property name="scaledContents">
              <bool>true</bool>
@@ -959,7 +1014,7 @@
              <string/>
             </property>
             <property name="pixmap">
-             <pixmap>:/icons/performous.png</pixmap>
+             <pixmap resource="../resources/qt/resources.qrc">:/icons/performous.png</pixmap>
             </property>
             <property name="scaledContents">
              <bool>true</bool>
@@ -975,6 +1030,72 @@
           </item>
           <item>
            <widget class="QPushButton" name="pushButton_browse_performous">
+            <property name="text">
+             <string>...</string>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <item>
+        <widget class="QGroupBox" name="groupBox_tune_perfect">
+         <property name="title">
+          <string>Tune Perfect</string>
+         </property>
+         <layout class="QHBoxLayout" name="horizontalLayout_13">
+          <property name="leftMargin">
+           <number>6</number>
+          </property>
+          <property name="topMargin">
+           <number>6</number>
+          </property>
+          <property name="rightMargin">
+           <number>6</number>
+          </property>
+          <property name="bottomMargin">
+           <number>6</number>
+          </property>
+          <item>
+           <widget class="QLabel" name="label_tune_perfect">
+            <property name="sizePolicy">
+             <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+              <horstretch>0</horstretch>
+              <verstretch>0</verstretch>
+             </sizepolicy>
+            </property>
+            <property name="minimumSize">
+             <size>
+              <width>32</width>
+              <height>32</height>
+             </size>
+            </property>
+            <property name="maximumSize">
+             <size>
+              <width>32</width>
+              <height>32</height>
+             </size>
+            </property>
+            <property name="text">
+             <string/>
+            </property>
+            <property name="pixmap">
+             <pixmap resource="../resources/qt/resources.qrc">:/icons/tune-perfect.png</pixmap>
+            </property>
+            <property name="scaledContents">
+             <bool>true</bool>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QLineEdit" name="lineEdit_path_tune_perfect">
+            <property name="readOnly">
+             <bool>true</bool>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QPushButton" name="pushButton_browse_tune_perfect">
             <property name="text">
              <string>...</string>
             </property>
@@ -1025,7 +1146,7 @@
              <string/>
             </property>
             <property name="pixmap">
-             <pixmap>:/icons/ultrastar-manager.png</pixmap>
+             <pixmap resource="../resources/qt/resources.qrc">:/icons/ultrastar-manager.png</pixmap>
             </property>
             <property name="scaledContents">
              <bool>true</bool>
@@ -1091,7 +1212,7 @@
              <string/>
             </property>
             <property name="pixmap">
-             <pixmap>:/icons/yass-reloaded.png</pixmap>
+             <pixmap resource="../resources/qt/resources.qrc">:/icons/yass-reloaded.png</pixmap>
             </property>
             <property name="scaledContents">
              <bool>true</bool>
@@ -1157,7 +1278,7 @@
              <string/>
             </property>
             <property name="pixmap">
-             <pixmap>:/icons/karedi.png</pixmap>
+             <pixmap resource="../resources/qt/resources.qrc">:/icons/karedi.png</pixmap>
             </property>
             <property name="scaledContents">
              <bool>true</bool>
@@ -1185,22 +1306,11 @@
      </widget>
     </widget>
    </item>
-   <item row="2" column="0">
-    <spacer name="verticalSpacer_2">
-     <property name="orientation">
-      <enum>Qt::Orientation::Vertical</enum>
-     </property>
-     <property name="sizeHint" stdset="0">
-      <size>
-       <width>20</width>
-       <height>40</height>
-      </size>
-     </property>
-    </spacer>
-   </item>
   </layout>
  </widget>
- <resources/>
+ <resources>
+  <include location="../resources/qt/resources.qrc"/>
+ </resources>
  <connections>
   <connection>
    <sender>buttonBox</sender>

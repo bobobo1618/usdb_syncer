@@ -104,3 +104,23 @@ class SongDirChanged(SubscriptableEvent):
     """Sent when the selected song directory has changed."""
 
     new_dir: Path
+
+
+# network
+
+
+@attrs.define(slots=False)
+class LoggedInToUSDB(SubscriptableEvent):
+    """Sent after log-in to USDB was attempted. Contains the logged in user if
+    successfull.
+    """
+
+    user: str | None
+
+
+# other
+
+
+@attrs.define(slots=False)
+class PreferencesChanged(SubscriptableEvent):
+    """Sent when the preferences potentially changed."""

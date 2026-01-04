@@ -6,6 +6,7 @@ import cProfile
 import logging
 import subprocess
 import sys
+import time
 import traceback
 from argparse import ArgumentParser
 from collections.abc import Callable
@@ -25,10 +26,11 @@ from usdb_syncer import (
     logger,
     settings,
     song_routines,
-    sync_meta,
-    usdb_song,
     utils,
+    webserver,
 )
+from usdb_syncer import sync_meta as sync_meta
+from usdb_syncer import usdb_song as usdb_song
 from usdb_syncer.gui import events, hooks, theme
 
 if TYPE_CHECKING:
@@ -48,6 +50,7 @@ class CliArgs:
     """Command line arguments."""
 
     reset_settings: bool = False
+    subcommand: str = ""
 
     # Settings
     songpath: Path | None = None
@@ -56,6 +59,14 @@ class CliArgs:
     profile: bool = False
     skip_pyside: bool = not utils.IS_SOURCE
     trace_sql: bool = False
+
+    # preview
+    txt: Path | None = None
+
+    # webserver
+    host: str | None = None
+    port: int | None = None
+    title: str | None = None
 
     @classmethod
     def parse(cls) -> CliArgs:
@@ -90,6 +101,29 @@ class CliArgs:
                 help="Skip PySide file generation.",
             )
 
+        subcommands = parser.add_subparsers(
+            title="subcommands", description="Subcommands.", dest="subcommand"
+        )
+        preview = subcommands.add_parser("preview", help="Show preview for song txt.")
+        preview.add_argument("txt", type=Path, help="Path to the song txt file.")
+
+        serve = subcommands.add_parser(
+            "serve", help="Launch webserver with local songs."
+        )
+        serve.add_argument(
+            "--host",
+            type=int,
+            help="Host for the webservice. Default is the device's public IP address. "
+            "Use 127.0.0.1 (localhost) to not be accessible by other devies "
+            "on the local network.",
+        )
+        serve.add_argument(
+            "--port",
+            type=int,
+            help="Port the webservice will bind to. Defaults to a random free port.",
+        )
+        serve.add_argument("--title", help="Title displayed at the top of the page.")
+
         return parser.parse_args(namespace=cls())
 
     def apply(self) -> None:
@@ -110,23 +144,41 @@ def main() -> None:
     args = CliArgs.parse()
     args.apply()
     utils.AppPaths.make_dirs()
-    if args.profile:
-        _with_profile(_run)
-    else:
-        _run()
-
-
-def _run() -> None:
-    from usdb_syncer.gui.mw import MainWindow
-
     app = _init_app()
     app.setAttribute(Qt.ApplicationAttribute.AA_DontShowIconsInMenus, False)
-    mw = MainWindow()
-    logger.configure_logging(
+
+    def run_main() -> None:
+        _run_main()
+        app.exec()
+
+    match args.subcommand:
+        case "preview":
+            if args.txt and _run_preview(args.txt):
+                app.exec()
+        case "serve":
+            _run_webserver(host=args.host, port=args.port, title=args.title)
+        case _:
+            if args.profile:
+                _with_profile(run_main)
+            else:
+                run_main()
+
+
+def configure_logging(mw: MainWindow | None = None) -> None:
+    handlers: list[logging.Handler] = [
         logging.FileHandler(utils.AppPaths.log, encoding="utf-8"),
         logging.StreamHandler(sys.stdout),
-        _TextEditLogger(mw),
-    )
+    ]
+    if mw:
+        handlers.append(_TextEditLogger(mw))
+    logger.configure_logging(*handlers)
+
+
+def _run_main() -> None:
+    from usdb_syncer.gui.mw import MainWindow
+
+    mw = MainWindow()
+    configure_logging(mw)
     mw.label_update_hint.setVisible(False)
     if not utils.IS_SOURCE:
         if version := utils.newer_version_available():
@@ -147,7 +199,27 @@ def _run() -> None:
         return
     addons.load_all()
     hooks.MainWindowDidLoad.call(mw)
-    app.exec()
+
+
+def _run_preview(txt: Path) -> bool:
+    configure_logging()
+    from usdb_syncer.gui.previewer import Previewer
+
+    theme.Theme.from_settings().apply()
+    return Previewer.load_txt(txt)
+
+
+def _run_webserver(
+    host: str | None = None, port: int | None = None, title: str | None = None
+) -> None:
+    configure_logging()
+    webserver.start(host=host, port=port, title=title)
+    logger.logger.info("Webserver is running in headless mode. Press Ctrl+C to stop.")
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        webserver.stop()
 
 
 def _excepthook(
@@ -175,13 +247,10 @@ def _load_main_window(mw: MainWindow) -> None:
     folder = settings.get_song_dir()
     db.connect(utils.AppPaths.db)
     with db.transaction():
-        song_routines.load_available_songs(force_reload=False)
-        song_routines.synchronize_sync_meta_folder(folder)
-        sync_meta.SyncMeta.reset_active(folder)
-        usdb_song.UsdbSong.clear_cache()
-        default_search = db.SavedSearch.get_default()
+        db.delete_session_data()
+    song_routines.load_available_songs_and_sync_meta(folder, False)
     mw.tree.populate()
-    if default_search:
+    if default_search := db.SavedSearch.get_default():
         events.SavedSearchRestored(default_search.search).post()
         logger.logger.info(f"Applied default search '{default_search.name}'.")
     mw.table.search_songs()

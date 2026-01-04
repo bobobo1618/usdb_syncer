@@ -3,6 +3,7 @@
 import builtins
 import collections.abc
 from collections import defaultdict
+from typing import ClassVar
 
 from usdb_syncer import db
 
@@ -11,20 +12,20 @@ class CustomData:
     """Dict of custom data."""
 
     _data: dict[str, str]
-    _options: defaultdict[str, builtins.set[str]] | None = None
+    _options: ClassVar[defaultdict[str, builtins.set[str]] | None] = None
     FORBIDDEN_CHARACTERS = '?"<>|*.:/\\'
 
     @classmethod
-    def value_options(cls, key: str) -> tuple[str, ...]:
+    def value_options(cls, key: str) -> builtins.set[str]:
         if cls._options is None:
             cls._options = db.get_custom_data_map()
-        return tuple(cls._options[key])
+        return cls._options.get(key, builtins.set())
 
     @classmethod
-    def key_options(cls) -> tuple[str, ...]:
+    def key_options(cls) -> collections.abc.Iterable[str]:
         if cls._options is None:
             cls._options = db.get_custom_data_map()
-        return tuple(cls._options)
+        return cls._options.keys()
 
     @classmethod
     def is_valid_key(cls, key: str) -> bool:
@@ -57,3 +58,6 @@ class CustomData:
 
     def __eq__(self, value: object) -> bool:
         return isinstance(value, CustomData) and self._data == value._data
+
+    def __contains__(self, key: object) -> bool:
+        return isinstance(key, str) and key in self._data

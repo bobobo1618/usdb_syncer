@@ -1,8 +1,12 @@
 """Functionality related to the usdb.animux.de web page."""
 
+from __future__ import annotations
+
+import html
 import re
 import time
 from collections.abc import Iterator
+from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
 from typing import Any, assert_never
@@ -12,7 +16,7 @@ import requests
 from bs4 import BeautifulSoup, NavigableString, Tag
 from requests import Session
 
-from usdb_syncer import SongId, errors, settings
+from usdb_syncer import SongId, db, errors, events, settings
 from usdb_syncer.constants import (
     SUPPORTED_VIDEO_SOURCES_REGEX,
     Usdb,
@@ -25,42 +29,91 @@ from usdb_syncer.logger import Logger, logger, song_logger
 from usdb_syncer.usdb_song import UsdbSong
 from usdb_syncer.utils import extract_youtube_id, normalize
 
+
+class UserRole(Enum):
+    ADMIN = "admin"
+    MODERATOR = "mod"
+    USER = "user"
+
+    def __str__(self) -> str:
+        return self.value
+
+
+@dataclass(frozen=True)
+class UsdbUser:
+    name: str
+    role: UserRole
+
+    @classmethod
+    def from_rank(cls, name: str, rank: int | None) -> UsdbUser:
+        """Create a UsdbUser from a numeric USDB rank code (0-4)."""
+
+        match rank:
+            case 4:
+                role = UserRole.ADMIN
+            case 3:
+                role = UserRole.MODERATOR
+            case _:
+                role = UserRole.USER
+        return cls(name=name, role=role)
+
+
 SONG_LIST_ROW_REGEX = re.compile(
+    r'<tr class="list_tr\d"\s+data-songid="(?P<song_id>\d+)"\s+'
+    r'data-lastchange="(?P<lastchange>\d+)"[^>]*?>\s*'
     r'<td(?:.*?<source src="(?P<sample_url>.*?)".*?)?></td>'
-    r'<td onclick="show_detail\((?P<song_id>\d+)\)".*?>'
-    r'<img src="(?P<cover_url>.*?)".*?></td>'
-    r'<td onclick="show_detail\(\d+\)">(?P<artist>.*?)</td>\n'
-    r'<td onclick="show_detail\(\d+\)"><a href=.*?>(?P<title>.*?)</td>\n'
-    r'<td onclick="show_detail\(\d+\)">(?P<genre>.*?)</td>\n'
-    r'<td onclick="show_detail\(\d+\)">(?P<year>.*?)</td>\n'
-    r'<td onclick="show_detail\(\d+\)">(?P<edition>.*?)</td>\n'
-    r'<td onclick="show_detail\(\d+\)">(?P<golden_notes>.*?)</td>\n'
-    r'<td onclick="show_detail\(\d+\)">(?P<language>.*?)</td>\n'
-    r'<td onclick="show_detail\(\d+\)">(?P<creator>.*?)</td>\n'
-    r'<td onclick="show_detail\(\d+\)">(?P<rating>.*?)</td>\n'
-    r'<td onclick="show_detail\(\d+\)">(?P<views>.*?)</td>'
+    r'<td[^>]*?><img src="(?P<cover_url>.*?)".*?></td>'
+    r"<td[^>]*?>(?P<artist>.*?)</td>\n"
+    r"<td[^>]*?><a href=.*?>(?P<title>.*?)</td>\n"
+    r"<td[^>]*?>(?P<genre>.*?)</td>\n"
+    r"<td[^>]*?>(?P<year>.*?)</td>\n"
+    r"<td[^>]*?>(?P<edition>.*?)</td>\n"
+    r"<td[^>]*?>(?P<golden_notes>.*?)</td>\n"
+    r"<td[^>]*?>(?P<language>.*?)</td>\n"
+    r"<td[^>]*?>(?P<creator>.*?)</td>\n"
+    r"<td[^>]*?>(?P<rating>.*?)</td>\n"
+    r"<td[^>]*?>(?P<views>.*?)</td>"
 )
 WELCOME_REGEX = re.compile(
     r"<td class='row3' colspan='2'>\s*<span class='gen'>([^<]+) <b>([^<]+)</b>"
 )
+RANK_REGEX = re.compile(r"images/rank_(\d)\.gif")
 
 
-def establish_usdb_login(session: Session) -> bool:
-    """Tries to log in to USDB if necessary. Returns final login status."""
-    if user := get_logged_in_usdb_user(session):
-        logger.info(f"Using existing login of USDB user '{user}'.")
-        return True
-    if (auth := settings.get_usdb_auth())[0] and auth[1]:
-        if login_to_usdb(session, *auth):
-            logger.info(f"Successfully logged in to USDB with user '{auth[0]}'.")
-            return True
-        logger.error(f"Login to USDB with user '{auth[0]}' failed!")
+def establish_usdb_login(session: Session) -> UsdbUser | None:
+    """Tries to log in to USDB if necessary. Returns user info or None."""
+    user = get_logged_in_usdb_user(session)
+
+    if user:
+        logger.info(f"Using existing USDB login of {user.role} '{user.name}'.")
     else:
-        logger.warning(
-            "Not logged in to USDB. Please go to 'Synchronize > USDB Login', then "
-            "select the browser you are logged in with and/or enter your credentials."
-        )
-    return False
+        auth_user, auth_pass = settings.get_usdb_auth()
+        if auth_user and auth_pass:
+            if login_to_usdb(session, auth_user, auth_pass):
+                user = get_logged_in_usdb_user(session)
+                if user:
+                    logger.info(
+                        "Successfully logged in to USDB with "
+                        f"{user.role} '{user.name}'."
+                    )
+                else:
+                    logger.error(
+                        "Login appeared successful, but user info could not be "
+                        "retrieved."
+                    )
+            else:
+                logger.error(f"Login to USDB with user '{auth_user}' failed!")
+        else:
+            logger.warning(
+                "Not logged in to USDB. Please go to 'Synchronize > USDB Login', then "
+                "select the browser you are logged in with and/or enter your "
+                "credentials."
+            )
+
+    if user:
+        events.LoggedInToUSDB(user=user.name).post()
+
+    return user
 
 
 def new_session_with_cookies(browser: settings.Browser) -> Session:
@@ -76,6 +129,7 @@ class SessionManager:
 
     _session: Session | None = None
     _connecting: bool = False
+    _user: UsdbUser | None = None
 
     @classmethod
     def session(cls) -> Session:
@@ -85,7 +139,7 @@ class SessionManager:
             cls._connecting = True
             try:
                 cls._session = new_session_with_cookies(settings.get_browser())
-                establish_usdb_login(cls._session)
+                cls._user = establish_usdb_login(cls._session)
             finally:
                 cls._connecting = False
         return cls._session
@@ -100,13 +154,26 @@ class SessionManager:
     def has_session(cls) -> bool:
         return cls._session is not None
 
+    @classmethod
+    def get_user(cls) -> UsdbUser | None:
+        return cls._user
 
-def get_logged_in_usdb_user(session: Session) -> str | None:
+
+def get_logged_in_usdb_user(session: Session) -> UsdbUser | None:
+    """Return the logged-in USDB user's name and role, or None if not logged in."""
     response = session.get(Usdb.BASE_URL, timeout=10, params={"link": "profil"})
     response.raise_for_status()
-    if match := WELCOME_REGEX.search(response.text):
-        return match.group(2)
-    return None
+
+    html = response.text
+
+    if not (welcome_match := WELCOME_REGEX.search(html)):
+        return None
+    username = welcome_match.group(2)
+
+    rank_match = RANK_REGEX.search(html)
+    rank = int(rank_match.group(1)) if rank_match else None
+
+    return UsdbUser.from_rank(username, rank)
 
 
 def login_to_usdb(session: Session, user: str, password: str) -> bool:
@@ -259,7 +326,7 @@ def _get_usdb_page_inner(
             assert_never(unreachable)
     response.raise_for_status()
     response.encoding = "utf-8"
-    if UsdbStrings.NOT_LOGGED_IN in (page := normalize(response.text)):
+    if UsdbStrings.NOT_LOGGED_IN in (page := normalize(html.unescape(response.text))):
         raise errors.UsdbLoginError
     if UsdbStrings.DATASET_NOT_FOUND in page:
         raise errors.UsdbNotFoundError
@@ -312,20 +379,20 @@ def _usdb_strings_from_welcome(welcome_string: str) -> type[UsdbStrings]:
     raise errors.UsdbUnknownLanguageError
 
 
-def get_usdb_available_songs(
-    max_skip_id: SongId,
+def get_updated_songs_from_usdb(
+    last_update: db.LastUsdbUpdate,
     content_filter: dict[str, str] | None = None,
     session: Session | None = None,
 ) -> list[UsdbSong]:
-    """Return a list of all available songs.
+    """Return a list of all songs that were updated (or added) since `last_update`.
 
     Parameters:
-        max_skip_id: only fetch ids larger than this
+        last_update: only fetch updates newer than this
         content_filter: filters response (e.g. {'artist': 'The Beatles'})
     """
-    available_songs: list[UsdbSong] = []
+    available_songs: dict[SongId, UsdbSong] = {}
     payload = {
-        "order": "id",
+        "order": "lastchange",
         "ud": "desc",
         "limit": str(Usdb.MAX_SONGS_PER_PAGE),
         "details": "1",
@@ -340,26 +407,27 @@ def get_usdb_available_songs(
             payload=payload,
             session=session,
         )
-        songs = [
-            song
+        songs = {
+            song.song_id: song
             for song in _parse_songs_from_songlist(html)
-            if song.song_id > max_skip_id
-        ]
-        available_songs.extend(songs)
+            if song.is_new_since_last_update(last_update)
+        }
+        available_songs.update(songs)
 
         if len(songs) < Usdb.MAX_SONGS_PER_PAGE:
             break
 
-    logger.info(f"Fetched {len(available_songs)} new song(s) from USDB.")
-    return available_songs
+    logger.info(f"Fetched {len(available_songs)} updated song(s) from USDB.")
+    return list(available_songs.values())
 
 
 def _parse_songs_from_songlist(html: str) -> Iterator[UsdbSong]:
     return (
         UsdbSong.from_html(
             _usdb_strings_from_html(html),
-            sample_url=match["sample_url"] or "",
             song_id=match["song_id"],
+            usdb_mtime=match["lastchange"],
+            sample_url=match["sample_url"] or "",
             artist=match["artist"],
             title=match["title"],
             genre=match["genre"],
@@ -387,7 +455,7 @@ def _parse_details_table(
     editors = []
     pointer = details_table.find(string=usdb_strings.SONG_EDITED_BY)
     while pointer is not None:
-        pointer = pointer.find_next("td")
+        pointer = pointer.find_next("td")  # type: ignore
         if pointer.a is None:  # type: ignore
             break
         editors.append(pointer.text.strip())  # type: ignore
@@ -434,7 +502,7 @@ def _parse_details_table(
         uploader=_find_text_after(details_table, usdb_strings.UPLOADED_BY),
         editors=editors,
         views=int(_find_text_after(details_table, usdb_strings.VIEWS)),
-        rating=sum("star.png" in s.get("src") for s in stars),
+        rating=sum("star.png" in (s.get("src") or "") for s in stars),
         votes=int(votes_str.split("(")[1].split(")")[0]),
         audio_sample=audio_sample or None,
     )
@@ -568,3 +636,26 @@ def post_song_rating(song_id: SongId, stars: int) -> None:
     )
     logger = song_logger(song_id)
     logger.debug(f"{stars}-star rating posted on USDB.")
+
+
+def submit_local_changes(
+    song_id: SongId, sample_url: str, txt: str, filename: str, logger: Logger
+) -> None:
+    """Submit local changes of a song to USDB."""
+
+    payload = {
+        "coverinput": "",
+        "sampleinput": sample_url,
+        "txt": txt,
+        "filename": filename,
+    }
+
+    get_usdb_page(
+        "index.php",
+        RequestMethod.POST,
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        params={"link": "editsongsupdate", "id": str(song_id)},
+        payload=payload,
+    )
+
+    logger.info("Local changes successfully submitted to USDB.")
