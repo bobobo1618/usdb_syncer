@@ -293,8 +293,8 @@ def compare_unicode_paths(lhs: Path, rhs: Path) -> bool:
 
 
 def resource_file_ending(name: str) -> str:
-    """Return the suffix or name, including " [BG]" and " [CO]"."""
-    regex = re.compile(r".+?((?: \[(?:CO|BG)\])?\.[^.]+)")
+    """Return the suffix or name, including known tagged suffixes."""
+    regex = re.compile(r".+?((?: \[(?:CO|BG|INSTR|VOC)\])?\.[^.]+)")
     if match := regex.fullmatch(name):
         return match.group(1)
     return ""
